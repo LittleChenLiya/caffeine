@@ -18,6 +18,14 @@ paths:
 
 ## Future Lifecycle
 
+- `getView` returns a per-caller future detached from the shared load future, with a per-call
+  deadline scheduled on the cache's configured scheduler (system scheduler if none). The view is
+  bound to the load generation at fetch time and never writes back, so a stale load cannot
+  overwrite a newer mapping. `ViewWaiter` is the single callback per view on the shared future;
+  when the view completes for any reason it detaches (cancels the timeout task, clears the view
+  reference) so completed views do not accumulate listeners on an in-flight load. The view's own
+  `CompletableFuture` first-write-wins semantics resolve completion/cancellation/timeout races to one
+  outcome. Statistics match `get` exactly; view cancellation and timeout record nothing.
 - In-flight futures have weight 0 and `ASYNC_EXPIRY` (~220 years). Completion finalizes only
   deferred weight/expiry work; a future already complete at insertion was weighed and dated then.
   An incomplete replacement releases its predecessor's weight and receives creation expiry when

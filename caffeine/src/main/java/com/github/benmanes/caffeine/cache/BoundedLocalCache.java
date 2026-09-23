@@ -4968,6 +4968,7 @@ abstract class BoundedLocalCache<K, V> extends BLCHeader.DrainStatusRef
 
     final BoundedLocalCache<K, CompletableFuture<V>> cache;
     final boolean isWeighted;
+    final Scheduler viewScheduler;
 
     @Nullable ConcurrentMap<K, CompletableFuture<V>> mapView;
     @Nullable CacheView<K, V> cacheView;
@@ -4978,11 +4979,17 @@ abstract class BoundedLocalCache<K, V> extends BLCHeader.DrainStatusRef
       cache = (BoundedLocalCache<K, CompletableFuture<V>>) LocalCacheFactory
           .newBoundedLocalCache(builder, /* cacheLoader= */ null, /* isAsync= */ true);
       isWeighted = builder.isWeighted();
+      viewScheduler = LocalAsyncCache.viewScheduler(builder);
     }
 
     @Override
     public BoundedLocalCache<K, CompletableFuture<V>> cache() {
       return cache;
+    }
+
+    @Override
+    public Scheduler viewScheduler() {
+      return viewScheduler;
     }
 
     @Override
@@ -5029,6 +5036,7 @@ abstract class BoundedLocalCache<K, V> extends BLCHeader.DrainStatusRef
 
     final BoundedLocalCache<K, CompletableFuture<V>> cache;
     final boolean isWeighted;
+    final Scheduler viewScheduler;
 
     @Nullable ConcurrentMap<K, CompletableFuture<V>> mapView;
     @Nullable Policy<K, V> policy;
@@ -5039,11 +5047,17 @@ abstract class BoundedLocalCache<K, V> extends BLCHeader.DrainStatusRef
       isWeighted = builder.isWeighted();
       cache = (BoundedLocalCache<K, CompletableFuture<V>>) LocalCacheFactory
           .newBoundedLocalCache(builder, loader, /* isAsync= */ true);
+      viewScheduler = LocalAsyncCache.viewScheduler(builder);
     }
 
     @Override
     public BoundedLocalCache<K, CompletableFuture<V>> cache() {
       return cache;
+    }
+
+    @Override
+    public Scheduler viewScheduler() {
+      return viewScheduler;
     }
 
     @Override

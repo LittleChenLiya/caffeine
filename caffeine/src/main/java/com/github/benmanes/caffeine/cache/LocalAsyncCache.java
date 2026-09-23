@@ -16,7 +16,9 @@
 package com.github.benmanes.caffeine.cache;
 
 import static com.github.benmanes.caffeine.cache.Caffeine.calculateHashMapCapacity;
+import static com.github.benmanes.caffeine.cache.Caffeine.requireArgument;
 import static com.github.benmanes.caffeine.cache.Caffeine.requireState;
+import static com.github.benmanes.caffeine.cache.Caffeine.toNanosSaturated;
 import static com.github.benmanes.caffeine.cache.Caffeine.toUnchecked;
 import static com.github.benmanes.caffeine.cache.LocalCache.castNonNull;
 import static java.util.Locale.US;
@@ -28,6 +30,7 @@ import java.io.ObjectInputStream;
 import java.io.Serializable;
 import java.lang.System.Logger;
 import java.lang.System.Logger.Level;
+import java.time.Duration;
 import java.util.AbstractCollection;
 import java.util.AbstractSet;
 import java.util.Collection;
@@ -44,6 +47,8 @@ import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.CompletionException;
 import java.util.concurrent.ConcurrentMap;
 import java.util.concurrent.Executor;
+import java.util.concurrent.Future;
+import java.util.concurrent.TimeUnit;
 import java.util.concurrent.TimeoutException;
 import java.util.function.BiConsumer;
 import java.util.function.BiFunction;
@@ -72,6 +77,24 @@ interface LocalAsyncCache<K, V> extends AsyncCache<K, V> {
 
   /** Returns the policy supported by this implementation and its configuration. */
   Policy<K, V> policy();
+
+  /**
+   * Returns the scheduler used to expire a waiting view's deadline. If the cache was not
+   * configured with a {@linkplain Caffeine#scheduler(Scheduler) scheduler} then the
+   * {@linkplain Scheduler#systemScheduler() system scheduler} is used, so that deadlines are
+   * enforced without blocking the common pool.
+   */
+  default Scheduler viewScheduler() {
+    return Scheduler.systemScheduler();
+  }
+
+  /** Returns the scheduler to expire waiting views with, based on the cache's configuration. */
+  static Scheduler viewScheduler(Caffeine<?, ?> builder) {
+    var scheduler = builder.getScheduler();
+    return (scheduler == Scheduler.disabledScheduler())
+        ? Scheduler.systemScheduler()
+        : scheduler;
+  }
 
   @Override
   default @Nullable CompletableFuture<V> getIfPresent(K key) {
@@ -117,6 +140,36 @@ interface LocalAsyncCache<K, V> extends AsyncCache<K, V> {
       handleCompletion(key, result[0], startTime, deferred[0], /* computed= */ true);
     }
     return requireNonNull(future);
+  }
+
+  @Override
+  default CompletableFuture<V> getView(K key,
+      Function<? super K, ? extends V> mappingFunction, Duration deadline) {
+    requireNonNull(mappingFunction);
+    return getView(key, (k, executor) -> CompletableFuture.supplyAsync(
+        () -> mappingFunction.apply(k), executor), deadline);
+  }
+
+  @Override
+  @SuppressWarnings("FutureReturnValueIgnored")
+  default CompletableFuture<V> getView(K key, BiFunction<? super K, ? super Executor,
+      ? extends CompletableFuture<? extends V>> mappingFunction, Duration deadline) {
+    requireNonNull(mappingFunction);
+    requireNonNull(deadline);
+    requireArgument(!deadline.isNegative(), "deadline must not be negative: %s", deadline);
+
+    CompletableFuture<V> shared = get(key, mappingFunction);
+    var view = new CompletableFuture<V>();
+    var waiter = new ViewWaiter<>(view);
+
+    // Release the timeout task and the view reference once the view completes for any reason.
+    view.whenComplete((value, error) -> waiter.detach());
+    // Propagate the shared load's outcome; runs synchronously if the load already completed.
+    shared.whenComplete(waiter);
+    // Schedule the deadline last so that an already-available value wins over a zero deadline.
+    waiter.setTimeoutTask(viewScheduler().schedule(cache().executor(), waiter::expire,
+        toNanosSaturated(deadline), TimeUnit.NANOSECONDS));
+    return view;
   }
 
   @Override
@@ -283,6 +336,71 @@ interface LocalAsyncCache<K, V> extends AsyncCache<K, V> {
         }
       }
     });
+  }
+
+  /**
+   * A detachable callback that propagates the completion of a shared load to a single waiting
+   * view. When the view completes for any reason (result, failure, cancellation, or timeout) the
+   * waiter detaches: the timeout task is cancelled and the view reference is released, so a
+   * completed view does not accumulate listeners or state on an in-flight load. The view's own
+   * completion is the single source of truth, so concurrent completion, cancellation, and
+   * timeout resolve to exactly one outcome and detachment is idempotent.
+   */
+  final class ViewWaiter<V> implements BiConsumer<@Nullable V, @Nullable Throwable> {
+    private @Nullable CompletableFuture<V> view;
+    private @Nullable Future<?> timeoutTask;
+    private boolean detached;
+
+    ViewWaiter(CompletableFuture<V> view) {
+      this.view = requireNonNull(view);
+    }
+
+    /** Sets the timeout task, cancelling it immediately if this waiter already detached. */
+    synchronized void setTimeoutTask(Future<?> timeoutTask) {
+      if (detached) {
+        timeoutTask.cancel(/* mayInterruptIfRunning= */ false);
+      } else {
+        this.timeoutTask = requireNonNull(timeoutTask);
+      }
+    }
+
+    /** Propagates the shared load's outcome to the view if it is still waiting. */
+    @Override
+    public void accept(@Nullable V value, @Nullable Throwable error) {
+      @Nullable CompletableFuture<V> pending;
+      synchronized (this) {
+        pending = view;
+      }
+      if (pending != null) {
+        if (error == null) {
+          pending.complete(castNonNull(value));
+        } else {
+          pending.completeExceptionally(error);
+        }
+      }
+    }
+
+    /** Fails the view with a {@link TimeoutException} if it is still waiting. */
+    void expire() {
+      @Nullable CompletableFuture<V> pending;
+      synchronized (this) {
+        pending = view;
+      }
+      if (pending != null) {
+        pending.completeExceptionally(new TimeoutException());
+      }
+    }
+
+    /** Releases the timeout task and the view reference after the view completed. */
+    synchronized void detach() {
+      detached = true;
+      view = null;
+      @Nullable Future<?> task = timeoutTask;
+      timeoutTask = null;
+      if (task != null) {
+        task.cancel(/* mayInterruptIfRunning= */ false);
+      }
+    }
   }
 
   /** A function executed asynchronously after a bulk load completes. */

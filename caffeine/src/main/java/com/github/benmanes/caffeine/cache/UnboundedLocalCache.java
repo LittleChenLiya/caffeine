@@ -1340,6 +1340,7 @@ final class UnboundedLocalCache<K, V> implements LocalCache<K, V> {
     private static final long serialVersionUID = 1;
 
     final UnboundedLocalCache<K, CompletableFuture<V>> cache;
+    final Scheduler viewScheduler;
 
     @Nullable ConcurrentMap<K, CompletableFuture<V>> mapView;
     @Nullable CacheView<K, V> cacheView;
@@ -1349,11 +1350,17 @@ final class UnboundedLocalCache<K, V> implements LocalCache<K, V> {
     UnboundedLocalAsyncCache(Caffeine<K, V> builder) {
       cache = new UnboundedLocalCache<>(
           (Caffeine<K, CompletableFuture<V>>) builder, /* isAsync= */ true);
+      viewScheduler = LocalAsyncCache.viewScheduler(builder);
     }
 
     @Override
     public UnboundedLocalCache<K, CompletableFuture<V>> cache() {
       return cache;
+    }
+
+    @Override
+    public Scheduler viewScheduler() {
+      return viewScheduler;
     }
 
     @Override
@@ -1401,6 +1408,7 @@ final class UnboundedLocalCache<K, V> implements LocalCache<K, V> {
     private static final long serialVersionUID = 1;
 
     final UnboundedLocalCache<K, CompletableFuture<V>> cache;
+    final Scheduler viewScheduler;
 
     @Nullable ConcurrentMap<K, CompletableFuture<V>> mapView;
     @Nullable Policy<K, V> policy;
@@ -1410,11 +1418,17 @@ final class UnboundedLocalCache<K, V> implements LocalCache<K, V> {
       super(loader);
       cache = new UnboundedLocalCache<>(
           (Caffeine<K, CompletableFuture<V>>) builder, /* isAsync= */ true);
+      viewScheduler = LocalAsyncCache.viewScheduler(builder);
     }
 
     @Override
     public LocalCache<K, CompletableFuture<V>> cache() {
       return cache;
+    }
+
+    @Override
+    public Scheduler viewScheduler() {
+      return viewScheduler;
     }
 
     @Override

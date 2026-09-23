@@ -402,6 +402,10 @@ public final class Caffeine<K, V> {
    * may not offer real-time guarantees (including {@link ScheduledThreadPoolExecutor}). The
    * scheduling is best-effort and does not make any hard guarantees of when an expired entry will
    * be removed.
+   * <p>
+   * This scheduler is also used to expire the wait deadline of a view returned by
+   * {@link AsyncCache#getView}. If no scheduler is configured then those deadlines are enforced
+   * by the {@link Scheduler#systemScheduler()}.
    *
    * @param scheduler the scheduler that submits a task to the {@link #executor(Executor)} after a
    *        given delay
