@@ -15,6 +15,9 @@
  */
 package com.github.benmanes.caffeine.cache;
 
+import static java.util.Objects.requireNonNull;
+
+import java.time.Duration;
 import java.util.Map;
 import java.util.Set;
 import java.util.concurrent.CompletableFuture;
@@ -168,6 +171,101 @@ public interface AsyncCache<K, V extends @Nullable Object> {
               ? super Executor,
               ? extends CompletableFuture<? extends Map<? extends K, ? extends @NonNull V>>>
           mappingFunction);
+
+  /**
+   * Returns a new future that completes with the result of the load for {@code key}, obtaining
+   * that load from {@code mappingFunction} if necessary, and that independently completes
+   * exceptionally with a {@link java.util.concurrent.TimeoutException} if the {@code deadline}
+   * expires first. This method provides an independent waiting view over the shared, cached load:
+   * unlike the future returned by {@link #get(Object, BiFunction)}, each invocation returns a new
+   * future that is detached from the cached future, so cancelling or timing out the returned
+   * future completes only this view and does not affect the cached future, other waiting views,
+   * or the in-flight load.
+   * <p>
+   * The view is bound to the generation of the load that is in flight when this method is
+   * invoked. If the mapping is invalidated or replaced while that load is still in flight, the
+   * view still completes with that load's result. The view never writes into the cache, so a
+   * stale load's result cannot overwrite a newer mapping.
+   * <p>
+   * The deadline is scheduled on the given {@code scheduler} and the timeout completion may run
+   * on the scheduler's thread. When the view completes, whether by the load's completion,
+   * cancellation, or timeout, the scheduled timeout task is cancelled and the view's completion
+   * callback is detached from the shared load. If the load, cancellation, and timeout race, the
+   * view still completes exactly once.
+   * <p>
+   * This method records no statistics of its own. The load is performed through
+   * {@link #get(Object, BiFunction)}, so a hit or miss, and the load's success or failure, are
+   * recorded exactly as if that method had been called. A view that is cancelled or that times
+   * out records nothing; in particular, a view timeout is not a load failure.
+   *
+   * @param key the key with which the specified value is to be associated
+   * @param mappingFunction the function to asynchronously compute a value
+   * @param deadline the maximum time to wait for the load before the returned future completes
+   *     exceptionally with a {@link java.util.concurrent.TimeoutException}
+   * @param scheduler the scheduler used to expire the deadline
+   * @return a new future that completes with the current (existing or computed) value associated
+   *     with the specified key, unless it is cancelled or the deadline expires first
+   * @throws NullPointerException if the specified key, mappingFunction, deadline, or scheduler is
+   *     null, or if the future returned by the mappingFunction is null
+   * @throws RuntimeException or Error if the mappingFunction does when constructing the future,
+   *     in which case the mapping is left unestablished
+   */
+  default CompletableFuture<V> getWaitingView(K key,
+      Function<? super K, ? extends V> mappingFunction,
+      Duration deadline, Scheduler scheduler) {
+    requireNonNull(mappingFunction);
+    return getWaitingView(key, (k, executor) -> CompletableFuture.supplyAsync(
+        () -> mappingFunction.apply(k), executor), deadline, scheduler);
+  }
+
+  /**
+   * Returns a new future that completes with the result of the load for {@code key}, obtaining
+   * that load from {@code mappingFunction} if necessary, and that independently completes
+   * exceptionally with a {@link java.util.concurrent.TimeoutException} if the {@code deadline}
+   * expires first. This method provides an independent waiting view over the shared, cached load:
+   * unlike the future returned by {@link #get(Object, BiFunction)}, each invocation returns a new
+   * future that is detached from the cached future, so cancelling or timing out the returned
+   * future completes only this view and does not affect the cached future, other waiting views,
+   * or the in-flight load.
+   * <p>
+   * The view is bound to the generation of the load that is in flight when this method is
+   * invoked. If the mapping is invalidated or replaced while that load is still in flight, the
+   * view still completes with that load's result. The view never writes into the cache, so a
+   * stale load's result cannot overwrite a newer mapping.
+   * <p>
+   * The deadline is scheduled on the given {@code scheduler} and the timeout completion may run
+   * on the scheduler's thread. When the view completes, whether by the load's completion,
+   * cancellation, or timeout, the scheduled timeout task is cancelled and the view's completion
+   * callback is detached from the shared load. If the load, cancellation, and timeout race, the
+   * view still completes exactly once.
+   * <p>
+   * This method records no statistics of its own. The load is performed through
+   * {@link #get(Object, BiFunction)}, so a hit or miss, and the load's success or failure, are
+   * recorded exactly as if that method had been called. A view that is cancelled or that times
+   * out records nothing; in particular, a view timeout is not a load failure.
+   *
+   * @param key the key with which the specified value is to be associated
+   * @param mappingFunction the function to asynchronously compute a value, optionally using the
+   *     given executor
+   * @param deadline the maximum time to wait for the load before the returned future completes
+   *     exceptionally with a {@link java.util.concurrent.TimeoutException}
+   * @param scheduler the scheduler used to expire the deadline
+   * @return a new future that completes with the current (existing or computed) value associated
+   *     with the specified key, unless it is cancelled or the deadline expires first
+   * @throws NullPointerException if the specified key, mappingFunction, deadline, or scheduler is
+   *     null, or if the future returned by the mappingFunction is null
+   * @throws RuntimeException or Error if the mappingFunction does when constructing the future,
+   *     in which case the mapping is left unestablished
+   */
+  default CompletableFuture<V> getWaitingView(K key,
+      BiFunction<? super K, ? super Executor, ? extends CompletableFuture<? extends V>>
+          mappingFunction,
+      Duration deadline, Scheduler scheduler) {
+    requireNonNull(mappingFunction);
+    requireNonNull(deadline);
+    requireNonNull(scheduler);
+    return LocalAsyncCache.newWaitingView(get(key, mappingFunction), deadline, scheduler);
+  }
 
   /**
    * Associates {@code value} with {@code key} in this cache. If the cache previously contained a

@@ -18,6 +18,17 @@ paths:
 
 ## Future Lifecycle
 
+- `AsyncCache.getWaitingView` returns a per-caller waiting view over the shared load from
+  `get(key, mappingFunction)`: a new `CompletableFuture` detached from the cached future, with
+  a deadline scheduled on a caller-supplied `Scheduler`. Cancelling or timing out the view
+  completes only that view; the cached future, other views, and the in-flight load are unaffected.
+  The view is bound to the load generation current at call time and never writes into the cache,
+  so a stale load's result cannot overwrite a newer mapping. Completion of the view by any means
+  cancels the timeout task and detaches the view's reference from the shared future's callback
+  (the callback itself is dropped when the load completes; `CompletableFuture` cannot
+  deregister it earlier). The view records no statistics of its own: the underlying `get`
+  records the hit or miss and the load's success or failure, and a view timeout or cancellation
+  is not a load failure.
 - In-flight futures have weight 0 and `ASYNC_EXPIRY` (~220 years). Completion finalizes only
   deferred weight/expiry work; a future already complete at insertion was weighed and dated then.
   An incomplete replacement releases its predecessor's weight and receives creation expiry when

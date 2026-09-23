@@ -28,6 +28,7 @@ import java.io.ObjectInputStream;
 import java.io.Serializable;
 import java.lang.System.Logger;
 import java.lang.System.Logger.Level;
+import java.time.Duration;
 import java.util.AbstractCollection;
 import java.util.AbstractSet;
 import java.util.Collection;
@@ -44,7 +45,10 @@ import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.CompletionException;
 import java.util.concurrent.ConcurrentMap;
 import java.util.concurrent.Executor;
+import java.util.concurrent.Future;
+import java.util.concurrent.TimeUnit;
 import java.util.concurrent.TimeoutException;
+import java.util.concurrent.atomic.AtomicReference;
 import java.util.function.BiConsumer;
 import java.util.function.BiFunction;
 import java.util.function.Consumer;
@@ -283,6 +287,71 @@ interface LocalAsyncCache<K, V> extends AsyncCache<K, V> {
         }
       }
     });
+  }
+
+  /**
+   * Returns a waiting view bound to the given shared load. The view completes with the shared
+   * future's result unless it first completes due to cancellation or expiration of the
+   * {@code deadline}. The view never modifies the cache, so the result of a stale load cannot
+   * overwrite a newer mapping. When the view completes, for any reason, its timeout task is
+   * cancelled and its reference is detached from the shared future's completion callback.
+   *
+   * @param shared the cached future that the view waits on
+   * @param deadline the maximum time to wait before the view completes exceptionally with a
+   *        {@link TimeoutException}
+   * @param scheduler the scheduler used to expire the deadline
+   * @return a new future detached from the shared future
+   */
+  @SuppressWarnings({"FutureReturnValueIgnored", "NullAway"})
+  static <V> CompletableFuture<V> newWaitingView(
+      CompletableFuture<V> shared, Duration deadline, Scheduler scheduler) {
+    var view = new CompletableFuture<V>();
+    var viewRef = new AtomicReference<@Nullable CompletableFuture<V>>(view);
+    var timeoutTask = new AtomicReference<@Nullable Future<?>>();
+
+    // Propagates the load's result to the view if it is still waiting. The shared future
+    // discards this callback when the load completes; if the view ends first then detaching
+    // the reference releases the view and turns the callback into a no-op.
+    shared.whenComplete((value, error) -> {
+      CompletableFuture<V> waiting = viewRef.getAndSet(null);
+      if (waiting != null) {
+        if (error == null) {
+          waiting.complete(value);
+        } else {
+          waiting.completeExceptionally(error);
+        }
+      }
+    });
+
+    // Releases the timeout task and the shared future's reference to this view. The view's own
+    // completion, by any means and exactly once, triggers this cleanup.
+    view.whenComplete((value, error) -> {
+      viewRef.set(null);
+      Future<?> task = timeoutTask.getAndSet(WaitingView.COMPLETED);
+      if ((task != null) && (task != WaitingView.COMPLETED)) {
+        task.cancel(/* mayInterruptIfRunning= */ false);
+      }
+    });
+
+    if (!view.isDone()) {
+      long delay = Math.max(0L, deadline.toNanos());
+      Future<?> task = scheduler.schedule(Runnable::run, () -> view.completeExceptionally(
+          new TimeoutException("Timed out waiting for the load after " + deadline)),
+          delay, TimeUnit.NANOSECONDS);
+      if (!timeoutTask.compareAndSet(null, task)) {
+        // The view completed while the timeout was being scheduled
+        task.cancel(/* mayInterruptIfRunning= */ false);
+      }
+    }
+    return view;
+  }
+
+  /** The namespace for the waiting view support. */
+  final class WaitingView {
+    /** The marker published when a view completes before its timeout task was scheduled. */
+    static final Future<?> COMPLETED = CompletableFuture.completedFuture(null);
+
+    private WaitingView() {}
   }
 
   /** A function executed asynchronously after a bulk load completes. */
