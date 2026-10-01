@@ -99,3 +99,15 @@ That can discard computed values without removal notifications. The views use at
 like the native caches; the synchronous view passes `recordLoad = false` to match
 `Cache.asMap().replaceAll`. Iterating `keySet()` preserves each view's entry eligibility,
 including the synchronous view's filtering of in-flight values through `getIfReady`.
+
+## Load Admission
+
+- `AsyncLoadAdmissionController` is an optional `AsyncCacheLoader` adapter that bounds loads
+  to a delegate: at most `maxConcurrency` running, at most `maxQueueSize` queued FIFO. A
+  same-key request joins the in-flight load, running or queued, through a dependent future, so
+  cancelling one caller never cancels the shared load. Queue-full and post-`close` requests
+  fail with `LoadRejectedException` and are not cached. A slot releases on completion, throw,
+  or executor rejection; the dequeue-and-start decision is atomic with `close` under one lock,
+  and queued loads are rejected on close while running ones finish. `LoadAdmissionStats` times
+  a load from slot acquisition, never from enqueue. Cache hits never reach the adapter, and
+  `asyncLoadAll` is unsupported, so `getAll` falls back to individual admitted loads.

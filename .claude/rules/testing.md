@@ -61,6 +61,7 @@ method.
 - Stats — tests under `stats/`
 - Scheduler — `SchedulerTest`
 - Async helpers — `AsyncTest`
+- Async load admission — `AsyncLoadAdmissionControllerTest`, `AsyncLoadAdmissionExampleTest`
 
 ### Internal / white-box
 - `BoundedLocalCache` internals — `BoundedLocalCacheTest`
