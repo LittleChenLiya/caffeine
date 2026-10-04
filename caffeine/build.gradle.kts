@@ -491,6 +491,7 @@ tasks.named<Jar>("jar").configure {
     "Export-Package" to listOf(
       "com.github.benmanes.caffeine",
       "com.github.benmanes.caffeine.cache",
+      "com.github.benmanes.caffeine.cache.eviction",
       "com.github.benmanes.caffeine.cache.stats").joinToString(",")))
 }
 

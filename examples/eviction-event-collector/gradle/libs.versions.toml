@@ -1,0 +1,9 @@
+[versions]
+caffeine = "3.3.0"
+junit-jupiter = "5.11.4"
+junit-platform-launcher = "1.11.4"
+
+[libraries]
+caffeine = { module = "com.github.ben-manes.caffeine:caffeine", version.ref = "caffeine" }
+junit-jupiter = { module = "org.junit.jupiter:junit-jupiter", version.ref = "junit-jupiter" }
+junit-platform-launcher = { module = "org.junit.platform:junit-platform-launcher", version.ref = "junit-platform-launcher" }
