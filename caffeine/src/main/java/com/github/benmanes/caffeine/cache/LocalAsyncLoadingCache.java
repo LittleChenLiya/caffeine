@@ -52,6 +52,7 @@ abstract class LocalAsyncLoadingCache<K, V>
   final BiFunction<? super K, ? super Executor,
       ? extends CompletableFuture<? extends V>> mappingFunction;
   final AsyncCacheLoader<K, V> cacheLoader;
+  final LoadingDependencyTracker<K, V> dependencyTracker;
 
   @Nullable LoadingCacheView<K, V> cacheView;
 
@@ -60,6 +61,7 @@ abstract class LocalAsyncLoadingCache<K, V>
     this.bulkMappingFunction = newBulkMappingFunction(cacheLoader);
     this.cacheLoader = (AsyncCacheLoader<K, V>) cacheLoader;
     this.mappingFunction = newMappingFunction(cacheLoader);
+    this.dependencyTracker = new LoadingDependencyTracker<>();
   }
 
   /** Returns a mapping function that adapts to {@link AsyncCacheLoader#asyncLoad}. */
@@ -68,6 +70,24 @@ abstract class LocalAsyncLoadingCache<K, V>
       ? super Executor,
       ? extends CompletableFuture<? extends V>> newMappingFunction(
           AsyncCacheLoader<? super K, V> cacheLoader) {
+    if (cacheLoader instanceof DependencyAwareAsyncCacheLoader<?, ?>) {
+      return (key, executor) -> {
+        try {
+          dependencyTracker.onLoadStart(key);
+          var context = new LoadingDependencyContextImpl<>(
+              key, dependencyTracker, LocalAsyncLoadingCache.this);
+          @SuppressWarnings("unchecked")
+          var loader = (DependencyAwareAsyncCacheLoader<K, V>) cacheLoader;
+          @SuppressWarnings("unchecked")
+          var future = (CompletableFuture<V>) loader.asyncLoad(key, executor, context);
+          dependencyTracker.onLoadFuture(key, future);
+          return future;
+        } catch (Exception e) {
+          dependencyTracker.onLoadComplete(key);
+          throw toUnchecked(e);
+        }
+      };
+    }
     return (key, executor) -> {
       try {
         return cacheLoader.asyncLoad(key, executor);
@@ -79,10 +99,14 @@ abstract class LocalAsyncLoadingCache<K, V>
 
   /**
    * Returns a mapping function that adapts to {@link AsyncCacheLoader#asyncLoadAll}, if
-   * implemented.
+   * implemented. Dependency-aware loaders use individual loads so that each load receives its own
+   * context.
    */
   @Nullable BiFunction<Set<? extends K>, Executor, CompletableFuture<Map<K, V>>>
       newBulkMappingFunction(AsyncCacheLoader<? super K, V> cacheLoader) {
+    if (cacheLoader instanceof DependencyAwareAsyncCacheLoader<?, ?>) {
+      return null;
+    }
     if (!canBulkLoad(cacheLoader)) {
       return null;
     }
