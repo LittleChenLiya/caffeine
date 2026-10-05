@@ -61,6 +61,7 @@ method.
 - Stats — tests under `stats/`
 - Scheduler — `SchedulerTest`
 - Async helpers — `AsyncTest`
+- Loading dependency tracking (`LoadDependencyTracker`, `LoadingDependencyContext`) — `LoadDependencyTrackerTest`
 
 ### Internal / white-box
 - `BoundedLocalCache` internals — `BoundedLocalCacheTest`

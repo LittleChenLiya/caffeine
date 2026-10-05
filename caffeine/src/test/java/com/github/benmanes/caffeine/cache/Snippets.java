@@ -114,6 +114,24 @@ final class Snippets {
   }
 
   @Test
+  void loadDependencyTracker() {
+    // @start region=loadDependencyTracker
+    ContextualAsyncCacheLoader<String, String> loader = (key, context) -> {
+      int separator = key.lastIndexOf('/');
+      if (separator < 0) {
+        return CompletableFuture.completedFuture(key);
+      }
+      return context.get(key.substring(0, separator))
+          .thenApply(parent -> parent + "/" + key.substring(separator + 1));
+    };
+    AsyncLoadingCache<String, String> cache = Caffeine.newBuilder()
+        .buildAsync(new LoadDependencyTracker<>(loader));
+    // @end region=loadDependencyTracker
+
+    assertThat(cache.get("a/b/c").join()).isEqualTo("a/b/c");
+  }
+
+  @Test
   @SuppressWarnings("TimeZoneUsage")
   void expiry() {
     // @start region=expiry
