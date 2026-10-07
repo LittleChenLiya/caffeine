@@ -52,6 +52,8 @@ method.
 - `AsyncLoadingCache` — `AsyncLoadingCacheTest`
 - `asMap()` view — `AsMapTest`, `AsyncAsMapTest`
 - Builder / spec — `CaffeineTest`, `CaffeineSpecTest`
+- `FailureMemoizingLoadingCache` — `FailureMemoizingLoadingCacheTest` (plain JUnit, not
+  `@CacheSpec`: the decorator needs a manual loader and a fake ticker)
 
 ### Feature areas
 - Eviction (size/weight, admission, hill climber) — `EvictionTest`, plus `BoundedLocalCacheTest` for white-box paths
